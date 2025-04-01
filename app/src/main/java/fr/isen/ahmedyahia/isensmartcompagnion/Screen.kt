@@ -2,6 +2,7 @@
 
 package fr.isen.ahmedyahia.isensmartcompagnion
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
@@ -11,6 +12,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,12 +48,17 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MaterialTheme.typography
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,8 +66,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,7 +81,34 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import fr.isen.ahmedyahia.isensmartcompagnion.api.EventRepository
 import kotlinx.coroutines.launch
 
-// Définition unique des routes pour la navigation incluant "Chat"
+// ------------------------------
+// 0) Thème personnalisé avec toutes les couleurs en rouge et fond blanc
+// ------------------------------
+private val RedColorScheme = lightColorScheme(
+    primary = Color.Red,
+    onPrimary = Color.White,
+    secondary = Color.Red,
+    onSecondary = Color.White,
+    background = Color.White,        // Fond en blanc
+    onBackground = Color.Black,        // Texte par défaut sur fond blanc
+    surface = Color.Red,
+    onSurface = Color.White,
+    error = Color.Red,
+    onError = Color.White
+)
+
+@Composable
+fun RedTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = RedColorScheme,
+        typography = typography,
+        content = content
+    )
+}
+
+// ------------------------------
+// 1) Définition unique des routes pour la navigation
+// ------------------------------
 sealed class Screen(val route: String, val title: String) {
     object Home : Screen("home", "Accueil")
     object Events : Screen("events", "Événements")
@@ -88,40 +124,61 @@ data class TabBarItem(
     val badgeAmount: Int? = null
 )
 
+// ------------------------------
+// 2) Repositories pour stocker l'état global
+// ------------------------------
+object AgendaRepository {
+    val agendaEvents = mutableStateListOf<Event>()
+
+    fun addEvent(event: Event) {
+        if (!agendaEvents.contains(event)) {
+            agendaEvents.add(event)
+        }
+    }
+}
+
+// Nouveau repository pour le "chat"
+object ChatRepository {
+    val messages = mutableStateListOf<String>()
+
+    fun addMessage(message: String) {
+        messages.add(message)
+    }
+}
+
+// ------------------------------
+// 3) Écran principal (MainScreen) avec la NavBar
+// ------------------------------
 @Composable
 fun MainScreen(navController: NavHostController) {
     val context = LocalContext.current
 
-    // Définition des éléments de la barre de navigation
+    // Définition des onglets
     val homeTab = TabBarItem(
         screen = Screen.Home,
         selectedIcon = Icons.Default.Home,
         unselectedIcon = Icons.Default.Home
     )
-
     val eventsTab = TabBarItem(
         screen = Screen.Events,
         selectedIcon = Icons.Default.DateRange,
         unselectedIcon = Icons.Default.DateRange
     )
-
     val agendaTab = TabBarItem(
         screen = Screen.Agenda,
         selectedIcon = Icons.Default.CalendarToday,
         unselectedIcon = Icons.Default.CalendarToday,
-        badgeAmount = 3  // Exemple de badge pour les messages non lus
+        badgeAmount = AgendaRepository.agendaEvents.size
     )
-
     val infoTab = TabBarItem(
         screen = Screen.Historique,
         selectedIcon = Icons.Default.History,
         unselectedIcon = Icons.Default.History
     )
 
-    // Liste de tous les onglets
     val tabBarItems = listOf(homeTab, eventsTab, agendaTab, infoTab)
 
-    // État de navigation actuel
+    // Gestion de la navigation courante
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
@@ -129,21 +186,23 @@ fun MainScreen(navController: NavHostController) {
         Box(modifier = Modifier.weight(1f)) {
             NavHost(navController = navController, startDestination = Screen.Home.route) {
                 composable(Screen.Home.route) {
+                    // 4) Nouvel écran d'accueil = assistant (avec GeminiAI)
                     HomeScreen()
                 }
                 composable(Screen.Events.route) {
                     EventListScreen()
                 }
                 composable(Screen.Agenda.route) {
-                    ChatScreen()
+                    AgendaScreen()
                 }
                 composable(Screen.Historique.route) {
-                    InfoScreen()
+                    // 5) On affiche l'historique des requêtes
+                    HistoryScreen()
                 }
             }
         }
 
-        // Barre de navigation améliorée avec icônes
+        // Barre de navigation
         NavigationBar {
             tabBarItems.forEach { item ->
                 val selected = currentRoute == item.screen.route
@@ -185,7 +244,7 @@ fun TabBarIconView(
     badgeAmount: Int? = null
 ) {
     BadgedBox(badge = {
-        if (badgeAmount != null) {
+        if (badgeAmount != null && badgeAmount > 0) {
             Badge {
                 Text(badgeAmount.toString())
             }
@@ -198,57 +257,161 @@ fun TabBarIconView(
     }
 }
 
+// ------------------------------
+// 4) HomeScreen = assistant (chat minimaliste avec GeminiAI et logo ISEN)
+// ------------------------------
 @Composable
 fun HomeScreen() {
     val context = LocalContext.current
+    var userInput by remember { mutableStateOf("") }
+    val messages = ChatRepository.messages
+    val coroutineScope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(color = MaterialTheme.colorScheme.background) // Fond blanc
             .padding(16.dp)
     ) {
+        // Affichage du logo de l'ISEN
+        Image(
+            painter = painterResource(id = R.drawable.isen), // Vérifiez que l'image "isen.png" est présente dans drawable
+            contentDescription = "Logo de l'ISEN",
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(150.dp)
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Text(
-            text = "Bienvenue à l'ISEN",
+            text = "Assistant virtuel",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier.padding(bottom = 16.dp),
+            color = MaterialTheme.colorScheme.primary // Texte en rouge
         )
 
-        // Contenu de l'écran d'accueil
-        Text(
-            text = "Consultez les événements à venir et restez informé des actualités de l'école.",
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(bottom = 24.dp)
-        )
-
-        // Bouton pour accéder aux événements (maintenant géré par la barre de navigation)
-        Button(
-            onClick = {
-                Toast.makeText(context, "Vous pouvez accéder aux événements via l'onglet Événements", Toast.LENGTH_SHORT).show()
-            },
-            modifier = Modifier.fillMaxWidth()
+        // Affichage des messages (chat)
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
         ) {
-            Text("Voir les événements")
+            items(messages) { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(8.dp),
+                    color = MaterialTheme.colorScheme.onBackground // Texte en noir sur fond blanc
+                )
+            }
+        }
+
+        // Champ de texte et bouton pour envoyer la requête
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextField(
+                value = userInput,
+                onValueChange = { newValue ->
+                    userInput = newValue
+                    println("HomeScreen - userInput modifié: $newValue")
+                },
+                modifier = Modifier.weight(1f),
+                label = { Text("Posez votre question...", color = MaterialTheme.colorScheme.primary) },
+                colors = TextFieldDefaults.colors(
+                    focusedTextColor = MaterialTheme.colorScheme.primary,
+                    unfocusedTextColor = MaterialTheme.colorScheme.primary,
+                    focusedContainerColor = MaterialTheme.colorScheme.background,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.background,
+                    cursorColor = MaterialTheme.colorScheme.primary,
+                    focusedIndicatorColor = MaterialTheme.colorScheme.primary,
+                    unfocusedIndicatorColor = MaterialTheme.colorScheme.primary
+                )
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    if (userInput.isNotBlank()) {
+                        println("HomeScreen - Envoyer cliqué avec input: $userInput")
+                        ChatRepository.addMessage("Vous: $userInput")
+                        val currentInput = userInput  // stocke la valeur actuelle
+                        userInput = ""               // vide ensuite le champ
+                        coroutineScope.launch {
+                            println("HomeScreen - Lancement de GeminiAI.analyzeText")
+                            val answer = GeminiAI.analyzeText(currentInput)
+                            println("HomeScreen - Réponse de GeminiAI: $answer")
+                            ChatRepository.addMessage("Assistant: $answer")
+                        }
+                    } else {
+                        Toast.makeText(context, "Veuillez saisir une question", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+            ) {
+                Text("Envoyer", color = MaterialTheme.colorScheme.onPrimary)
+            }
         }
     }
 }
 
+
+// ------------------------------
+// 5) Écran Historique = affiche la liste complète des messages du chat
+// ------------------------------
+@Composable
+fun HistoryScreen() {
+    val messages = ChatRepository.messages
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(color = MaterialTheme.colorScheme.background) // Fond blanc
+            .padding(16.dp)
+    ) {
+        Text(
+            text = "Historique des requêtes",
+            style = typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (messages.isEmpty()) {
+            Text("Aucune requête pour le moment.", color = MaterialTheme.colorScheme.onBackground)
+        } else {
+            LazyColumn {
+                items(messages) { message ->
+                    Text(
+                        text = message,
+                        style = typography.bodyLarge,
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------
+// 6) Écran EventListScreen et EventCard (autres écrans existants)
+// ------------------------------
 @Composable
 fun EventListScreen() {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val repository = remember { EventRepository() }
 
-    // États pour gérer le chargement et les erreurs
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var events by remember { mutableStateOf<List<Event>>(emptyList()) }
 
-    // Fonction pour charger les événements
     fun loadEvents() {
         isLoading = true
         errorMessage = null
-
         coroutineScope.launch {
             repository.getEvents()
                 .onSuccess { eventList ->
@@ -262,7 +425,6 @@ fun EventListScreen() {
         }
     }
 
-    // Charger les événements au lancement
     LaunchedEffect(Unit) {
         loadEvents()
     }
@@ -270,9 +432,9 @@ fun EventListScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(color = MaterialTheme.colorScheme.background) // Fond blanc
             .padding(16.dp)
     ) {
-        // En-tête avec titre et bouton de rafraîchissement
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -280,86 +442,75 @@ fun EventListScreen() {
         ) {
             Text(
                 text = "Événements à venir",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
+                style = typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
             )
-
-            // Bouton de rafraîchissement
             Button(
                 onClick = { loadEvents() },
-                enabled = !isLoading
+                enabled = !isLoading,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
-                    contentDescription = "Rafraîchir"
+                    contentDescription = "Rafraîchir",
+                    tint = MaterialTheme.colorScheme.onPrimary
                 )
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Affichage du contenu en fonction de l'état
         when {
             isLoading -> {
-                // Affichage du chargement
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        CircularProgressIndicator()
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Chargement des événements...")
+                        Text("Chargement des événements...", color = MaterialTheme.colorScheme.onBackground)
                     }
                 }
             }
-
             errorMessage != null -> {
-                // Affichage de l'erreur
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = "Erreur: $errorMessage",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.error,
+                            style = typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(
-                            onClick = { loadEvents() }
+                            onClick = { loadEvents() },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
-                            Text("Réessayer")
+                            Text("Réessayer", color = MaterialTheme.colorScheme.onPrimary)
                         }
                     }
                 }
             }
-
             events.isEmpty() -> {
-                // Aucun événement trouvé
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Aucun événement disponible",
-                        style = MaterialTheme.typography.bodyLarge,
-                        textAlign = TextAlign.Center
+                        style = typography.bodyLarge,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onBackground
                     )
                 }
             }
-
             else -> {
-                // Affichage de la liste des événements
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize()
-                ) {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(events) { event ->
                         EventCard(event)
                         Spacer(modifier = Modifier.height(12.dp))
@@ -376,52 +527,45 @@ fun EventCard(event: Event) {
     var expanded by remember { mutableStateOf(false) }
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = MaterialTheme.colorScheme.surface // Ici, toujours rouge (selon le thème)
         )
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            // En-tête de la carte
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    modifier = Modifier.weight(1f).padding(0.dp,0.dp,8.dp,0.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
                     text = event.title,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
-
-                // Badge de catégorie
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
-                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .background(MaterialTheme.colorScheme.primary)
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
                         text = event.category,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        style = typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimary
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Informations de date et lieu
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Default.DateRange,
                     contentDescription = "Date",
@@ -431,7 +575,8 @@ fun EventCard(event: Event) {
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = event.date,
-                    style = MaterialTheme.typography.bodyMedium
+                    style = typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground
                 )
                 Spacer(modifier = Modifier.width(16.dp))
                 Icon(
@@ -443,39 +588,37 @@ fun EventCard(event: Event) {
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = event.location,
-                    style = MaterialTheme.typography.bodyMedium
+                    style = typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground
                 )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Description courte
             Text(
                 text = event.description,
-                style = MaterialTheme.typography.bodyMedium,
+                style = typography.bodyMedium,
                 maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onBackground
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Bouton Détail
             Button(
                 onClick = { expanded = !expanded },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                ),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.align(Alignment.End)
             ) {
-                Text("Détail")
+                Text("Détail", color = MaterialTheme.colorScheme.onPrimary)
                 Spacer(modifier = Modifier.width(4.dp))
                 Icon(
                     imageVector = Icons.Default.Info,
-                    contentDescription = "Voir détails"
+                    contentDescription = "Voir détails",
+                    tint = MaterialTheme.colorScheme.onPrimary
                 )
             }
 
-            // Section détaillée avec animation
             val visibilityState = remember { MutableTransitionState(false) }
             visibilityState.targetState = expanded
 
@@ -502,45 +645,50 @@ fun EventCard(event: Event) {
                         .padding(top = 8.dp)
                 ) {
                     Divider(
-                        color = MaterialTheme.colorScheme.outlineVariant,
+                        color = MaterialTheme.colorScheme.onBackground,
                         thickness = 1.dp,
                         modifier = Modifier.padding(vertical = 8.dp)
                     )
-
                     Text(
                         text = "Description complète",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
-
                     Spacer(modifier = Modifier.height(4.dp))
-
                     Text(
                         text = event.description,
-                        style = MaterialTheme.typography.bodyMedium
+                        style = typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onBackground
                     )
-
                     Spacer(modifier = Modifier.height(8.dp))
-
                     Button(
                         onClick = {
-                            // Au clic, démarrez l'activité de détail en passant l'objet Event via Serializable
-                            val intent = android.content.Intent(context, EventDetailActivity::class.java)
+                            val intent = Intent(context, EventDetailActivity::class.java)
                             intent.putExtra("event", event)
                             context.startActivity(intent)
                         },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.secondary
-                        ),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         modifier = Modifier.align(Alignment.End)
                     ) {
-                        Text("Voir plus")
+                        Text("Voir plus", color = MaterialTheme.colorScheme.onPrimary)
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
                             imageVector = Icons.Default.ArrowForward,
-                            contentDescription = "Voir plus de détails"
+                            contentDescription = "Voir plus de détails",
+                            tint = MaterialTheme.colorScheme.onPrimary
                         )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            AgendaRepository.addEvent(event)
+                            Toast.makeText(context, "Événement ajouté à l'agenda", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("Ajouter à l'agenda", color = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
             }
@@ -550,61 +698,33 @@ fun EventCard(event: Event) {
 
 @Composable
 fun AgendaScreen() {
+    val agendaEvents = AgendaRepository.agendaEvents
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(color = MaterialTheme.colorScheme.background) // Fond blanc
             .padding(16.dp)
     ) {
         Text(
             text = "Agenda",
-            style = MaterialTheme.typography.headlineMedium
-        )
-    }
-}
-
-@Composable
-fun HistoryScreen() {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        Text(
-            text = "Historique",
-            style = MaterialTheme.typography.headlineMedium
-        )
-    }
-}
-
-@Composable
-fun ChatScreen() {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        Text(
-            text = "Chat",
-            style = MaterialTheme.typography.headlineMedium
+            style = typography.headlineMedium,
+            color = MaterialTheme.colorScheme.primary
         )
         Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "Ici se trouve le chat",
-            style = MaterialTheme.typography.bodyLarge
-        )
-    }
-}
-
-@Composable
-fun InfoScreen() {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        Text(
-            text = "Info",
-            style = MaterialTheme.typography.headlineMedium
-        )
+        if (agendaEvents.isEmpty()) {
+            Text(
+                text = "Aucun événement ajouté à l'agenda",
+                style = typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        } else {
+            LazyColumn {
+                items(agendaEvents) { event ->
+                    EventCard(event)
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+            }
+        }
     }
 }

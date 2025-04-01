@@ -14,8 +14,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "apiKey", "\"AIzaSyDnN097PcVqhpv6f3dje6u56msK4ePFEH4\"")
     }
 
     buildTypes {
@@ -35,6 +35,7 @@ android {
         jvmTarget = "11"
     }
     buildFeatures {
+        buildConfig = true
         compose = true
     }
 }
@@ -52,17 +53,20 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.generativeai)
     implementation(libs.androidx.material.icons.extended)
-    
+
+
     // Retrofit pour les appels API
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    
+
     // Gson pour le parsing JSON
     implementation("com.google.code.gson:gson:2.10.1")
-    
+
     // OkHttp pour les logs et l'interception des requêtes
     implementation("com.squareup.okhttp3:logging-interceptor:4.11.0")
-    
+
+    implementation("androidx.compose.material:material-icons-extended:1.3.1")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -71,4 +75,4 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
-}
+} 
