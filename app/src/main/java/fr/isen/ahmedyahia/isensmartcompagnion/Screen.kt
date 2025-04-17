@@ -14,11 +14,14 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,14 +30,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Badge
@@ -47,6 +54,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MaterialTheme.typography
 import androidx.compose.material3.NavigationBar
@@ -74,12 +82,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import fr.isen.ahmedyahia.isensmartcompagnion.api.EventRepository
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
+import java.time.temporal.TemporalAdjusters
+import java.util.UUID
+import java.util.Locale
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
 
 // ------------------------------
 // 0) Thème personnalisé avec toutes les couleurs en rouge et fond blanc
@@ -139,10 +158,27 @@ object AgendaRepository {
 
 // Nouveau repository pour le "chat"
 object ChatRepository {
-    val messages = mutableStateListOf<String>()
-
+    // Classe pour représenter un message avec sa date
+    data class ChatMessage(
+        val id: String = UUID.randomUUID().toString(),
+        val content: String,
+        val timestamp: Long = System.currentTimeMillis()
+    )
+    
+    val messages = mutableStateListOf<ChatMessage>()
+    
     fun addMessage(message: String) {
-        messages.add(message)
+        messages.add(ChatMessage(content = message))
+    }
+    
+    fun deleteMessage(messageId: String) {
+        messages.removeIf { it.id == messageId }
+    }
+    
+    fun formatTimestamp(timestamp: Long): String {
+        val date = Date(timestamp)
+        val formatter = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+        return formatter.format(date)
     }
 }
 
@@ -299,12 +335,36 @@ fun HomeScreen() {
                 .fillMaxWidth()
         ) {
             items(messages) { message ->
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(8.dp),
-                    color = MaterialTheme.colorScheme.onBackground // Texte en noir sur fond blanc
-                )
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (message.content.startsWith("Vous:")) 
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                        else 
+                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+                        Text(
+                            text = ChatRepository.formatTimestamp(message.timestamp),
+                            style = typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        
+                        Spacer(modifier = Modifier.height(4.dp))
+                        
+                        Text(
+                            text = message.content,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                }
             }
         }
 
@@ -364,6 +424,7 @@ fun HomeScreen() {
 @Composable
 fun HistoryScreen() {
     val messages = ChatRepository.messages
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -384,12 +445,54 @@ fun HistoryScreen() {
         } else {
             LazyColumn {
                 items(messages) { message ->
-                    Text(
-                        text = message,
-                        style = typography.bodyLarge,
-                        modifier = Modifier.padding(vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = ChatRepository.formatTimestamp(message.timestamp),
+                                    style = typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                
+                                IconButton(
+                                    onClick = {
+                                        ChatRepository.deleteMessage(message.id)
+                                        Toast.makeText(context, "Message supprimé", Toast.LENGTH_SHORT).show()
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Supprimer",
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                            
+                            Spacer(modifier = Modifier.height(4.dp))
+                            
+                            Text(
+                                text = message.content,
+                                style = typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
             }
         }
@@ -699,6 +802,36 @@ fun EventCard(event: Event) {
 @Composable
 fun AgendaScreen() {
     val agendaEvents = AgendaRepository.agendaEvents
+    val currentMonth = remember { mutableStateOf(YearMonth.now()) }
+    val selectedDate = remember { mutableStateOf<LocalDate?>(LocalDate.now()) }
+    
+    // Convertir les dates des événements en LocalDate
+    // La clé "agendaEvents" assure que cette valeur est recalculée chaque fois que agendaEvents change
+    val eventDates = remember(agendaEvents) {
+        agendaEvents.mapNotNull { it.getLocalDate() }.toSet()
+    }
+    
+    // Filtrer les événements pour la date sélectionnée
+    val eventsForSelectedDate = remember(selectedDate.value, agendaEvents) {
+        if (selectedDate.value != null) {
+            agendaEvents.filter { event ->
+                event.getLocalDate() == selectedDate.value
+            }
+        } else {
+            emptyList()
+        }
+    }
+
+    // Effet pour mettre à jour la date sélectionnée si un nouvel événement est ajouté pour aujourd'hui
+    LaunchedEffect(agendaEvents.size) {
+        val today = LocalDate.now()
+        val hasEventToday = agendaEvents.any { it.getLocalDate() == today }
+        
+        // Si un événement a été ajouté pour aujourd'hui et aucune date n'est sélectionnée, sélectionner aujourd'hui
+        if (hasEventToday && selectedDate.value == null) {
+            selectedDate.value = today
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -711,19 +844,256 @@ fun AgendaScreen() {
             style = typography.headlineMedium,
             color = MaterialTheme.colorScheme.primary
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        if (agendaEvents.isEmpty()) {
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Affichage du mois et des boutons de navigation
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = {
+                currentMonth.value = currentMonth.value.minusMonths(1)
+            }) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowLeft,
+                    contentDescription = "Mois précédent"
+                )
+            }
+            
             Text(
-                text = "Aucun événement ajouté à l'agenda",
-                style = typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onBackground
+                text = currentMonth.value.format(DateTimeFormatter.ofPattern("MMMM yyyy")),
+                style = typography.titleMedium
             )
-        } else {
-            LazyColumn {
-                items(agendaEvents) { event ->
-                    EventCard(event)
-                    Spacer(modifier = Modifier.height(12.dp))
+            
+            IconButton(onClick = {
+                currentMonth.value = currentMonth.value.plusMonths(1)
+            }) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowRight,
+                    contentDescription = "Mois suivant"
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Affichage des jours de la semaine
+        Row(modifier = Modifier.fillMaxWidth()) {
+            val daysOfWeek = listOf("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
+            daysOfWeek.forEach { day ->
+                Text(
+                    text = day,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    style = typography.bodyMedium
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Affichage du calendrier
+        val firstDayOfMonth = currentMonth.value.atDay(1)
+        val lastDayOfMonth = currentMonth.value.atEndOfMonth()
+        
+        // Déterminer le premier jour à afficher (lundi de la semaine contenant le 1er du mois)
+        val firstDayToShow = firstDayOfMonth.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        
+        // Déterminer le dernier jour à afficher (dimanche de la semaine contenant le dernier jour du mois)
+        val lastDayToShow = lastDayOfMonth.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
+        
+        // Calculer le nombre de semaines à afficher
+        val numWeeks = ChronoUnit.WEEKS.between(firstDayToShow, lastDayToShow) + 1
+        
+        // Afficher le calendrier
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+        ) {
+            for (weekIndex in 0 until numWeeks.toInt()) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    for (dayIndex in 0..6) {
+                        val day = firstDayToShow.plusDays((weekIndex * 7 + dayIndex).toLong())
+                        val isCurrentMonth = day.month == currentMonth.value.month
+                        val isSelected = day == selectedDate.value
+                        val hasEvents = eventDates.contains(day)
+                        
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                                .padding(2.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        isSelected -> MaterialTheme.colorScheme.primary
+                                        hasEvents -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                        else -> Color.Transparent
+                                    }
+                                )
+                                .border(
+                                    width = if (isSelected) 0.dp else 1.dp,
+                                    color = if (isSelected) Color.Transparent else 
+                                           if (hasEvents) MaterialTheme.colorScheme.primary 
+                                           else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                                    shape = CircleShape
+                                )
+                                .clickable {
+                                    selectedDate.value = day
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = day.dayOfMonth.toString(),
+                                style = typography.bodyMedium,
+                                color = when {
+                                    isSelected -> MaterialTheme.colorScheme.onPrimary
+                                    !isCurrentMonth -> MaterialTheme.colorScheme.onBackground.copy(alpha = 0.3f)
+                                    hasEvents -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onBackground
+                                }
+                            )
+                        }
+                    }
                 }
+                
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Affichage des événements pour la date sélectionnée
+        if (selectedDate.value != null) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = "Événements du ${selectedDate.value?.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))}",
+                        style = typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Bold
+                    )
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    if (eventsForSelectedDate.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Aucun événement pour cette date",
+                                style = typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(eventsForSelectedDate) { event ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                                    )
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp)
+                                    ) {
+                                        Text(
+                                            text = event.title,
+                                            style = typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.LocationOn,
+                                                contentDescription = "Lieu",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = event.location,
+                                                style = typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onBackground
+                                            )
+                                        }
+                                        
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        
+                                        Text(
+                                            text = event.description,
+                                            style = typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onBackground,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(50))
+                                                .background(MaterialTheme.colorScheme.primary)
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                .align(Alignment.End)
+                                        ) {
+                                            Text(
+                                                text = event.category,
+                                                style = typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onPrimary
+                                            )
+                                        }
+                                    }
+                                }
+                                
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            if (agendaEvents.isEmpty()) {
+                Text(
+                    text = "Aucun événement ajouté à l'agenda",
+                    style = typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+            } else {
+                Text(
+                    text = "Sélectionnez une date pour voir les événements",
+                    style = typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                )
             }
         }
     }
