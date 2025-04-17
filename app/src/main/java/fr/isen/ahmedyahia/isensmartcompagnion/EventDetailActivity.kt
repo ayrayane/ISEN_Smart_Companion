@@ -14,10 +14,18 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import fr.isen.ahmedyahia.isensmartcompagnion.notification.NotificationHelper
+import fr.isen.ahmedyahia.isensmartcompagnion.notification.PermissionHandler
+import fr.isen.ahmedyahia.isensmartcompagnion.notification.PreferencesManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,8 +42,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -47,9 +58,21 @@ import fr.isen.ahmedyahia.isensmartcompagnion.ui.theme.ISENSmartCompagnionTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 class EventDetailActivity : ComponentActivity() {
+    
+    // Making these public so they can be accessed from composables
+    lateinit var preferencesManager: PreferencesManager
+    lateinit var notificationHelper: NotificationHelper
+    lateinit var permissionHandler: PermissionHandler
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        // Initialisation des gestionnaires
+        preferencesManager = PreferencesManager(this)
+        notificationHelper = NotificationHelper(this)
+        permissionHandler = PermissionHandler(this)
+        permissionHandler.initialize()
+        
         // Récupération de l'objet Event transmis via Serializable
         val event = intent.getSerializableExtra("event") as? Event
 
@@ -85,7 +108,13 @@ class EventDetailActivity : ComponentActivity() {
 @Composable
 fun EventDetailScreen(event: Event?, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val activity = context as EventDetailActivity
     var showContent by remember { mutableStateOf(false) }
+    
+    // État pour le toggle de notification
+    var isNotificationEnabled by remember { 
+        mutableStateOf(event?.id?.let { activity.preferencesManager.isEventNotificationEnabled(it) } ?: false)
+    }
 
     LaunchedEffect(Unit) {
         // Déclencher l'animation après un court délai
@@ -106,11 +135,59 @@ fun EventDetailScreen(event: Event?, modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = event.description, style = MaterialTheme.typography.bodyLarge)
             Spacer(modifier = Modifier.height(16.dp))
+            
+            // Switch pour activer/désactiver les notifications
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (isNotificationEnabled) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                    contentDescription = "Notification",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "  Recevoir une notification pour cet événement",
+                    modifier = Modifier.weight(1f).padding(start = 8.dp)
+                )
+                Switch(
+                    checked = isNotificationEnabled,
+                    onCheckedChange = { checked ->
+                        isNotificationEnabled = checked
+                        event?.id?.let { eventId ->
+                            // Sauvegarder la préférence
+                            activity.preferencesManager.saveEventNotificationPreference(eventId, checked)
+                            
+                            // Si activé, envoyer une notification après 10 secondes
+                            if (checked) {
+                                Toast.makeText(context, "Vous recevrez une notification dans 10 secondes", Toast.LENGTH_SHORT).show()
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    delay(10000) // 10 secondes
+                                    activity.notificationHelper.showEventNotification(event)
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
             // Bouton pour ajouter l'événement à l'agenda
             Button(
                 onClick = {
                     AgendaRepository.addEvent(event)
                     Toast.makeText(context, "Événement ajouté à l'agenda", Toast.LENGTH_SHORT).show()
+                    
+                    // Envoyer une notification immédiatement
+                    try {
+                        // Utiliser directement le MainActivity pour accéder au NotificationHelper
+                        val mainActivity = context.applicationContext as? MainActivity
+                        mainActivity?.notificationHelper?.showEventNotification(event)
+                            ?: Toast.makeText(context, "Impossible d'envoyer la notification", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        Toast.makeText(context, "Erreur: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.secondary

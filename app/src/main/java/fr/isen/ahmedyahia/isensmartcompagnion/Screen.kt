@@ -2,7 +2,10 @@
 
 package fr.isen.ahmedyahia.isensmartcompagnion
 
+import android.content.Context
 import android.content.Intent
+import fr.isen.ahmedyahia.isensmartcompagnion.database.Conversation
+import androidx.compose.runtime.LaunchedEffect
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
@@ -148,10 +151,24 @@ data class TabBarItem(
 // ------------------------------
 object AgendaRepository {
     val agendaEvents = mutableStateListOf<Event>()
+    private var context: Context? = null
+    
+    /**
+     * Initialize the repository with a context for notifications
+     */
+    fun initialize(context: Context) {
+        this.context = context
+    }
 
     fun addEvent(event: Event) {
         if (!agendaEvents.contains(event)) {
             agendaEvents.add(event)
+            
+            // Send notification when event is added
+            val ctx = context
+            if (ctx is MainActivity) {
+                ctx.sendEventNotification(event)
+            }
         }
     }
 }
@@ -299,9 +316,22 @@ fun TabBarIconView(
 @Composable
 fun HomeScreen() {
     val context = LocalContext.current
+    val activity = context as? MainActivity
     var userInput by remember { mutableStateOf("") }
-    val messages = ChatRepository.messages
+    
+    // Utiliser la base de données Room pour récupérer les conversations
+    val historyManager = activity?.historyManager
+    var conversations by remember { mutableStateOf(emptyList<Conversation>()) }
+    
+    // Collecter les conversations depuis le Flow
+    LaunchedEffect(historyManager) {
+        historyManager?.allConversations?.collect { convList ->
+            conversations = convList
+        }
+    }
+    
     val coroutineScope = rememberCoroutineScope()
+    var isLoading by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -328,43 +358,82 @@ fun HomeScreen() {
             color = MaterialTheme.colorScheme.primary // Texte en rouge
         )
 
-        // Affichage des messages (chat)
+        // Affichage des conversations depuis la base de données Room
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
         ) {
-            items(messages) { message ->
+            items(conversations) { conversation ->
+                // Message de l'utilisateur (question)
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (message.content.startsWith("Vous:")) 
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
-                        else 
-                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
                     )
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp)
                     ) {
                         Text(
-                            text = ChatRepository.formatTimestamp(message.timestamp),
-                            style = typography.labelSmall,
+                            text = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(conversation.timestamp)),
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         
                         Spacer(modifier = Modifier.height(4.dp))
                         
                         Text(
-                            text = message.content,
+                            text = "Vous: ${conversation.question}",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onBackground
                         )
                     }
                 }
+                
+                // Réponse de l'IA
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+                        Text(
+                            text = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(conversation.timestamp)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        
+                        Spacer(modifier = Modifier.height(4.dp))
+                        
+                        Text(
+                            text = "Assistant: ${conversation.answer}",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+
+        // Indicateur de chargement
+        if (isLoading) {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
             }
         }
 
@@ -375,10 +444,7 @@ fun HomeScreen() {
         ) {
             TextField(
                 value = userInput,
-                onValueChange = { newValue ->
-                    userInput = newValue
-                    println("HomeScreen - userInput modifié: $newValue")
-                },
+                onValueChange = { newValue -> userInput = newValue },
                 modifier = Modifier.weight(1f),
                 label = { Text("Posez votre question...", color = MaterialTheme.colorScheme.primary) },
                 colors = TextFieldDefaults.colors(
@@ -395,21 +461,30 @@ fun HomeScreen() {
             Button(
                 onClick = {
                     if (userInput.isNotBlank()) {
-                        println("HomeScreen - Envoyer cliqué avec input: $userInput")
-                        ChatRepository.addMessage("Vous: $userInput")
                         val currentInput = userInput  // stocke la valeur actuelle
                         userInput = ""               // vide ensuite le champ
+                        isLoading = true              // affiche l'indicateur de chargement
+                        
                         coroutineScope.launch {
-                            println("HomeScreen - Lancement de GeminiAI.analyzeText")
-                            val answer = GeminiAI.analyzeText(currentInput)
-                            println("HomeScreen - Réponse de GeminiAI: $answer")
-                            ChatRepository.addMessage("Assistant: $answer")
+                            try {
+                                val answer = GeminiAI.analyzeText(currentInput)
+                                if (answer.contains("Une erreur s'est produite")) {
+                                    // Afficher un message d'erreur plus convivial
+                                    Toast.makeText(context, "Un problème est survenu avec l'IA. Veuillez réessayer.", Toast.LENGTH_LONG).show()
+                                }
+                            } catch (e: Exception) {
+                                // Gestion des exceptions imprévues
+                                Toast.makeText(context, "Erreur inattendue: ${e.message}", Toast.LENGTH_LONG).show()
+                                e.printStackTrace()
+                            } finally {
+                                isLoading = false          // cache l'indicateur de chargement dans tous les cas
+                            }
+                            // La sauvegarde dans la base de données est déjà faite dans GeminiAI.analyzeText
                         }
                     } else {
                         Toast.makeText(context, "Veuillez saisir une question", Toast.LENGTH_SHORT).show()
                     }
                 }
-
             ) {
                 Text("Envoyer", color = MaterialTheme.colorScheme.onPrimary)
             }
@@ -419,82 +494,34 @@ fun HomeScreen() {
 
 
 // ------------------------------
-// 5) Écran Historique = affiche la liste complète des messages du chat
+// 5) Écran Historique = affiche l'historique des conversations depuis la base de données Room
 // ------------------------------
 @Composable
 fun HistoryScreen() {
-    val messages = ChatRepository.messages
     val context = LocalContext.current
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(color = MaterialTheme.colorScheme.background) // Fond blanc
-            .padding(16.dp)
-    ) {
-        Text(
-            text = "Historique des requêtes",
-            style = typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
+    val activity = context as? MainActivity
+    
+    if (activity != null) {
+        // Utiliser le gestionnaire d'historique de l'activité principale
+        fr.isen.ahmedyahia.isensmartcompagnion.database.ConversationHistoryScreen(
+            historyManager = activity.historyManager,
+            onBackClick = { /* Ne rien faire car c'est un onglet de navigation */ }
         )
-        Spacer(modifier = Modifier.height(16.dp))
-
-        if (messages.isEmpty()) {
-            Text("Aucune requête pour le moment.", color = MaterialTheme.colorScheme.onBackground)
-        } else {
-            LazyColumn {
-                items(messages) { message ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = ChatRepository.formatTimestamp(message.timestamp),
-                                    style = typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                
-                                IconButton(
-                                    onClick = {
-                                        ChatRepository.deleteMessage(message.id)
-                                        Toast.makeText(context, "Message supprimé", Toast.LENGTH_SHORT).show()
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Supprimer",
-                                        tint = MaterialTheme.colorScheme.error
-                                    )
-                                }
-                            }
-                            
-                            Spacer(modifier = Modifier.height(4.dp))
-                            
-                            Text(
-                                text = message.content,
-                                style = typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(4.dp))
-                }
-            }
+    } else {
+        // Fallback si l'activité n'est pas disponible
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(color = MaterialTheme.colorScheme.background)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "Impossible de charger l'historique",
+                style = typography.headlineMedium,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
